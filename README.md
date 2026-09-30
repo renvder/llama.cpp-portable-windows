@@ -27,6 +27,7 @@ Double-click `start.bat` and chat with a local LLM in your browser. On the first
 ## Documentation
 
 - [EN](docs/setup.md) | [漢](docs/setup_tw.md)
+- Blog: [EN](https://renvder.com/en/blog/llama-cpp-windows-one-click-setup/) | [漢](https://renvder.com/blog/llama-cpp-windows-one-click-setup/)
 
 ## Notes
 
