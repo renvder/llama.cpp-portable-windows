@@ -25,8 +25,8 @@
 
 ## 文檔
 
-- 倉庫: [漢](docs/setup_tw.md) | [EN](docs/setup.md)
-- 博客: [漢](https://renvder.com/blog/llama-cpp-windows-one-click-setup/) | [EN](https://renvder.com/en/blog/llama-cpp-windows-one-click-setup/)
+- 安裝指南: [漢](docs/setup_tw.md) | [EN](docs/setup.md)
+- 博客文章: [漢](https://renvder.com/blog/llama-cpp-windows-one-click-setup/) | [EN](https://renvder.com/en/blog/llama-cpp-windows-one-click-setup/)
 
 ## 注意事項
 
