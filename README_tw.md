@@ -1,7 +1,6 @@
 <p align="right">
-  🌐 <b></b>
-  <a href="./README.md"><b>EN</b></a> | 
-  <b>漢</b></a>
+  🌐 <a href="./README.md"><b>EN</b></a> |
+  <b>漢</b>
 </p>
 
 # llama.cpp Windows 便攜啟動器
