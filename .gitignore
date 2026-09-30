@@ -1,0 +1,23 @@
+# Downloaded llama.cpp builds (created automatically on first run)
+runtime/*
+!runtime/README.txt
+
+# Your models (huge). Only the placeholder README is kept
+models/*
+!models/README.txt
+*.gguf
+
+# Manual / legacy install folders
+llama-cuda*/
+llama-vulkan/
+llama-cpu/
+llama.cpp/
+
+# Personal settings (copy presets.example.ini to presets.ini)
+presets.ini
+presets.ini.bak
+
+# Logs and test files (may contain your user name and local paths)
+*.log
+*-log.txt
+body.json
