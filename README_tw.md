@@ -27,6 +27,7 @@
 ## 文檔
 
 - [漢](docs/setup_tw.md) | [EN](docs/setup.md)
+- 文章: [漢](https://renvder.com/blog/llama-cpp-windows-one-click-setup/) | [EN](https://renvder.com/en/blog/llama-cpp-windows-one-click-setup/)
 
 ## 注意事項
 
