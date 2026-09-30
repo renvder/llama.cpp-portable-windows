@@ -1,7 +1,6 @@
 <p align="right">
-  🌐 <b></b>
-  <a href="./setup.md"><b>EN</b></a> | 
-  <b>漢</b></a>
+  🌐 <a href="./setup.md"><b>EN</b></a> |
+  <b>漢</b>
 </p>
 
 # llama.cpp Windows 一鍵安裝與使用指南
