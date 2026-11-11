@@ -325,7 +325,7 @@ nvidia-smi --query-gpu=memory.used,memory.total --format=csv
 | `Executable` 指向 `runtime\vulkan\llama-server.exe` | Vulkan 模式，正常 |
 | 速度很慢 | 模型太大或部分內容落到內存；可換更小的量化模型或降低 ctx |
 | 8080 無法使用 | 腳本會自動選擇其他可用端口，直接使用界面顯示的 URL |
-| 更新 llama.cpp | 刪除或移走對應的 `runtime\<backend>\` 後重新運行 `start.bat`，腳本會重新下載官方 build |
+| 更新 llama.cpp | 雙擊 `update.bat`（它會先比對已安裝版本，已經是最新版就不下載） |
 | 第一次運行時沒有網絡 / 無法訪問 GitHub | 從 llama.cpp Releases 頁面手動下載主程序 zip（CUDA 版再加 `cudart` zip），全部解壓到 `runtime\<backend>\`（例如 `runtime\cuda13\`），腳本會直接使用 |
 | 換新電腦 | 直接拷貝整個文件夾；第一次在新電腦上運行時會重新檢測硬件並選擇對應 backend |
 

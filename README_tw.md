@@ -23,6 +23,10 @@
 - 依顯存自動設定上下文長度、KV 快取與 GPU 卸載等合理的預設值
 - 可透過 `presets.ini` 做單個模型的進階設定（範本：`presets.example.ini`）
 
+## 更新
+
+雙擊 **`update.bat`**，把已安裝的 runtime 更新到最新官方版。它會比對 `runtime\<backend>\runtime-info.json` 裡的已安裝版本和線上最新版，先下載、校驗完再替換，更新中途失敗也不會讓你沒得用。已經是最新版就不下載。雙擊 `start.bat` 啟動時不會檢查更新，斷網也能正常啟動。注意：`update.bat` 不在源碼裡，第一次啟動時由 `start.bat` 自動生成到根目錄。
+
 ## 文檔
 
 - 安裝指南: [漢](docs/setup_tw.md) | [EN](docs/setup.md)

@@ -23,6 +23,10 @@ Double-click `start.bat` and chat with a local LLM in your browser. On the first
 - Sensible defaults for context, KV cache and GPU offload based on your VRAM
 - Optional per-model settings via `presets.ini` (template: `presets.example.ini`)
 
+## Updating
+
+Double-click **`update.bat`** to update the installed runtime to the latest official release. It compares the installed release in `runtime\<backend>\runtime-info.json` with the newest release for your hardware, downloads and verifies it first, then swaps it in — a failed download never leaves you with no runtime. If it is already up to date, nothing is downloaded. Launching with `start.bat` never checks for updates, so it also works offline. Note: `update.bat` is not shipped in the source tree — `start.bat` generates it in the package root on first launch.
+
 ## Documentation
 
 - Setup Guide: [EN](docs/setup.md) | [漢](docs/setup_tw.md)

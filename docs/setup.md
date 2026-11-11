@@ -326,7 +326,7 @@ With 16 GB or more of VRAM the launcher does not force a context size: it comes 
 | `Executable` points to `runtime\vulkan\llama-server.exe` | Correct for Vulkan mode |
 | Generation is slow | The model may be spilling into system RAM. Try a smaller quantization or a lower context size |
 | Port 8080 won't work | The launcher picks another port. Use the URL shown in the console |
-| You want to update llama.cpp | Delete or move the matching `runtime\<backend>\` folder, then run `start.bat` again |
+| You want to update llama.cpp | Double-click `update.bat` (it checks the installed release first; already up to date means nothing is downloaded) |
 | No internet / GitHub is blocked on the first run | Download the main zip (plus the `cudart` zip for CUDA builds) manually from the llama.cpp Releases page and extract both into `runtime\<backend>\` (e.g. `runtime\cuda13\`). The launcher will use them |
 | Moving to a new PC | Copy the whole folder. On the first run, the launcher detects the new hardware and installs the right backend |
 

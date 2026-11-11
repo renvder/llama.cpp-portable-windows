@@ -11,6 +11,17 @@
 #    - Reuse the locally installed runtime when it matches the detected hardware.
 #    - If the PC/backend changes, automatically install the appropriate runtime.
 #
+#  Updating (separate, manual step; launching never checks for updates):
+#    - Double-click update.bat, or run: powershell -File llama-oneclick.ps1 -UpdateOnly
+#    - It compares the installed release (runtime\<backend>\runtime-info.json)
+#      with the newest official release for the detected backend.
+#    - Already up to date -> nothing is downloaded, it just exits.
+#    - Newer online -> downloads to a temp folder, verifies SHA-256, extracts
+#      to a staging folder, then swaps it in. The old runtime is kept as a
+#      backup until the new one is in place, so a failed download never
+#      leaves you with no runtime. Offline / API failure -> skip, keep local.
+#    - start.bat also creates update.bat in the package root if it is missing.
+#
 #  Backends:
 #    NVIDIA + driver >= 580  -> CUDA 13
 #    NVIDIA + driver >= 525  -> CUDA 12
@@ -19,6 +30,8 @@
 #
 #  The script keeps the existing model/router/VRAM/preset logic below.
 # =====================================================================
+
+param([switch]$UpdateOnly)
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -154,6 +167,73 @@ function Get-LocalRuntime {
     return $null
 }
 
+function Get-TagNumber($tag) {
+    if ($tag -match '^b(\d+)$') { return [int]$Matches[1] }
+    return $null
+}
+
+function Get-LocalReleaseTag($ExePath) {
+    $candidates = @()
+    $candidates += (Join-Path (Join-Path $RUNTIME_DIR $backend) "runtime-info.json")
+    if ($ExePath) { $candidates += (Join-Path (Split-Path $ExePath -Parent) "runtime-info.json") }
+    foreach ($f in $candidates) {
+        if (Test-Path $f) {
+            try {
+                $info = Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($info.release) { return [string]$info.release }
+            } catch { }
+        }
+    }
+    return $null
+}
+
+function Get-LatestReleaseForBackend($Backend) {
+    switch ($Backend) {
+        "cuda13" {
+            $mainPattern = '^llama-.*-bin-win-cuda-13\.\d+-x64\.zip$'
+            $cudartPattern = '^cudart-llama-bin-win-cuda-13\.\d+-x64\.zip$'
+        }
+        "cuda12" {
+            $mainPattern = '^llama-.*-bin-win-cuda-12\.\d+-x64\.zip$'
+            $cudartPattern = '^cudart-llama-bin-win-cuda-12\.\d+-x64\.zip$'
+        }
+        "vulkan" { $mainPattern = '^llama-.*-bin-win-vulkan-x64\.zip$' }
+        default   { $mainPattern = '^llama-.*-bin-win-cpu-x64\.zip$' }
+    }
+    # Do not assume /releases/latest contains binaries. Since v0.5.0 the
+    # newest stable release can point to a nightly build while carrying only
+    # a marker asset. Search the official release list for the newest release
+    # that actually contains the backend we need.
+    $releases = Get-ReleasesWithAssets
+    foreach ($r in ($releases | Where-Object { -not $_.draft } | Sort-Object { [datetime]$_.published_at } -Descending)) {
+        $assets = @($r.assets)
+        $candidate = Find-Asset $assets $mainPattern
+        if (-not $candidate) { continue }
+        $candidateCudart = $null
+        if ($Backend -eq "cuda13" -or $Backend -eq "cuda12") {
+            $candidateCudart = Find-Asset $assets $cudartPattern
+            if (-not $candidateCudart) { continue }
+        }
+        return @{ Release = $r; Main = $candidate; Cudart = $candidateCudart; Tag = $r.tag_name }
+    }
+    return $null
+}
+
+function Ensure-UpdateLauncher {
+    $bat = Join-Path $ROOT "update.bat"
+    if (Test-Path $bat) { return }
+    $lines = @(
+        '@echo off',
+        'chcp 65001 >nul',
+        'cd /d "%~dp0"',
+        '',
+        'rem Update the installed llama.cpp runtime to the latest release, then exit.',
+        'rem It does not start the server.',
+        '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0llama-oneclick.ps1" -UpdateOnly'
+    )
+    $lines | Set-Content -Path $bat -Encoding ASCII
+}
+
 function Get-ReleasesWithAssets {
     $headers = @{ "User-Agent" = "llama.cpp-portable-launcher"; "Accept" = "application/vnd.github+json" }
     try {
@@ -189,49 +269,14 @@ function Install-PortableRuntime {
     Say "  Selecting the official Windows x64 build for: $backendLabel" Yellow
     Say "  Downloading from ggml-org/llama.cpp ..." Cyan
 
-    # Do not assume /releases/latest contains binaries.  Since v0.5.0 the
-    # newest stable release can point to a nightly build while carrying only
-    # a marker asset.  Search the official release list for the newest release
-    # that actually contains the backend we need.
-    $releases = Get-ReleasesWithAssets
-    $main = $null
-    $cudart = $null
-    $release = $null
-
-    switch ($backend) {
-        "cuda13" {
-            $mainPattern = '^llama-.*-bin-win-cuda-13\.\d+-x64\.zip$'
-            $cudartPattern = '^cudart-llama-bin-win-cuda-13\.\d+-x64\.zip$'
-        }
-        "cuda12" {
-            $mainPattern = '^llama-.*-bin-win-cuda-12\.\d+-x64\.zip$'
-            $cudartPattern = '^cudart-llama-bin-win-cuda-12\.\d+-x64\.zip$'
-        }
-        "vulkan" { $mainPattern = '^llama-.*-bin-win-vulkan-x64\.zip$' }
-        default   { $mainPattern = '^llama-.*-bin-win-cpu-x64\.zip$' }
-    }
-
-    foreach ($r in ($releases | Where-Object { -not $_.draft } | Sort-Object { [datetime]$_.published_at } -Descending)) {
-        $assets = @($r.assets)
-        $candidate = Find-Asset $assets $mainPattern
-        if (-not $candidate) { continue }
-
-        if ($backend -eq "cuda13" -or $backend -eq "cuda12") {
-            $candidateCudart = Find-Asset $assets $cudartPattern
-            if (-not $candidateCudart) { continue }
-            $cudart = $candidateCudart
-        }
-
-        $release = $r
-        $main = $candidate
-        break
-    }
-
-    if (-not $release -or -not $main) {
+    $latest = Get-LatestReleaseForBackend $backend
+    if (-not $latest -or -not $latest.Main) {
         throw "No official Windows x64 build for $backend was found in the latest 100 llama.cpp releases."
     }
-
-    $tag = $release.tag_name
+    $release = $latest.Release
+    $main = $latest.Main
+    $cudart = $latest.Cudart
+    $tag = $latest.Tag
 
     $target = Join-Path $RUNTIME_DIR $backend
     $temp = Join-Path $env:TEMP ("llama-cpp-portable-" + [guid]::NewGuid().ToString("N"))
@@ -253,21 +298,25 @@ function Install-PortableRuntime {
             $allZips += $cudaZip
         }
 
-        if (Test-Path $target) { Remove-Item $target -Recurse -Force }
-        New-Item -ItemType Directory -Path $target | Out-Null
+        # Safe replace: extract to a staging folder inside $temp first, verify
+        # the new build, and only then swap it in. The old runtime is moved
+        # aside as a backup until the swap succeeds, so a failed download or
+        # extraction never leaves you with no runtime.
+        $staging = Join-Path $temp "extracted"
+        New-Item -ItemType Directory -Path $staging | Out-Null
 
         foreach ($z in $allZips) {
-            Expand-Archive -Path $z -DestinationPath $target -Force
+            Expand-Archive -Path $z -DestinationPath $staging -Force
         }
 
         # Some releases put binaries in a nested directory. Flatten one level when needed.
-        $found = Get-ChildItem $target -Recurse -Filter "llama-server.exe" -File | Select-Object -First 1
+        $found = Get-ChildItem $staging -Recurse -Filter "llama-server.exe" -File | Select-Object -First 1
         if (-not $found) { throw "Download completed, but llama-server.exe was not found after extraction." }
 
-        # If nested, move the extracted contents to the backend root.
-        if ($found.Directory.FullName -ne $target) {
+        # If nested, move the extracted contents to the staging root.
+        if ($found.Directory.FullName -ne $staging) {
             $nested = $found.Directory.FullName
-            Get-ChildItem $nested -Force | Move-Item -Destination $target -Force
+            Get-ChildItem $nested -Force | Move-Item -Destination $staging -Force
             if (Test-Path $nested) { Remove-Item $nested -Recurse -Force -ErrorAction SilentlyContinue }
         }
 
@@ -279,7 +328,29 @@ function Install-PortableRuntime {
             cuda_runtime_asset = if ($cudart) { $cudart.name } else { $null }
             installed_at = (Get-Date).ToString("o")
         }
-        $info | ConvertTo-Json | Set-Content -Path (Join-Path $target "runtime-info.json") -Encoding UTF8
+        $info | ConvertTo-Json | Set-Content -Path (Join-Path $staging "runtime-info.json") -Encoding UTF8
+
+        # Copy (not Move) the staging folder into place: $staging lives
+        # under $env:TEMP, $target may be on another drive, and Move-Item
+        # across volumes is not reliable in Windows PowerShell 5.1.
+        # Copy-Item works across drives. $temp is cleaned up by the
+        # finally block below, so the staging folder does not linger.
+        $backup = $null
+        if (Test-Path $target) {
+            $backup = "$target.old"
+            if (Test-Path $backup) { Remove-Item $backup -Recurse -Force }
+            Move-Item $target $backup
+        }
+        try {
+            New-Item -ItemType Directory -Path $target | Out-Null
+            Copy-Item (Join-Path $staging "*") $target -Recurse -Force
+            if (-not (Test-Path (Join-Path $target "llama-server.exe"))) { throw "Copy to $target completed, but llama-server.exe was not found." }
+        } catch {
+            if (Test-Path $target) { Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue }
+            if ($backup -and (Test-Path $backup)) { Move-Item $backup $target -ErrorAction SilentlyContinue }
+            throw
+        }
+        if ($backup -and (Test-Path $backup)) { Remove-Item $backup -Recurse -Force -ErrorAction SilentlyContinue }
         return (Join-Path $target "llama-server.exe")
     } finally {
         if (Test-Path $temp) { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }
@@ -287,6 +358,79 @@ function Install-PortableRuntime {
 }
 
 $exe = Get-LocalRuntime
+
+# ---------------------------------------------------------------------
+# 2b. Update-only mode (update.bat / -UpdateOnly)
+#      Never starts the server. Launching (start.bat) never reaches here
+#      with -UpdateOnly, so launching never checks for updates and never
+#      blocks on a missing network.
+# ---------------------------------------------------------------------
+if ($UpdateOnly) {
+    $running = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
+    if ($running) {
+        Say ""
+        Say "  llama-server is still running. Close it first, then run update.bat again." Yellow
+        Read-Host "  Press Enter to exit"; exit 1
+    }
+
+    if (-not $exe) {
+        Say ""
+        Say "  No local runtime found. Installing the latest release..." Cyan
+        try { $exe = Install-PortableRuntime }
+        catch { Fail "Automatic llama.cpp installation failed.`n`n$($_.Exception.Message)" }
+        Say ""
+        Say "  Installed: $exe" Green
+        Read-Host "  Press Enter to exit"; exit 0
+    }
+
+    $localTag = Get-LocalReleaseTag $exe
+    if (-not $localTag) {
+        Say ""
+        Say "  Local version is unknown (no runtime-info.json). This may be a manual install." Yellow
+        $ans = Read-Host "  Replace it with the latest official build? (y/N)"
+        if ($ans -notmatch '^[Yy]$') { Say "  Update cancelled. Local runtime left unchanged." Yellow; exit 0 }
+        try { $exe = Install-PortableRuntime }
+        catch { Fail "Update failed. Local runtime was left unchanged.`n`n$($_.Exception.Message)" }
+        Say ""
+        Say "  Updated: $exe" Green
+        Read-Host "  Press Enter to exit"; exit 0
+    }
+
+    Say ""
+    Say "  Local version : $localTag" White
+    try {
+        $latest = Get-LatestReleaseForBackend $backend
+    } catch {
+        Say ""
+        Say "  Cannot reach GitHub ($($_.Exception.Message)). Update skipped; local runtime is unchanged." Yellow
+        Read-Host "  Press Enter to exit"; exit 0
+    }
+    if (-not $latest) {
+        Say "  No official Windows x64 build for $backend was found. Update skipped; local runtime is unchanged." Yellow
+        Read-Host "  Press Enter to exit"; exit 0
+    }
+    Say "  Latest online : $($latest.Tag)" White
+
+    $localNum = Get-TagNumber $localTag
+    $latestNum = Get-TagNumber $latest.Tag
+    if ($localNum -and $latestNum) { $isLatest = ($latestNum -le $localNum) }
+    else { $isLatest = ($latest.Tag -eq $localTag) }
+
+    if ($isLatest) {
+        Say ""
+        Say "  Already up to date ($localTag). Nothing to download." Green
+        Read-Host "  Press Enter to exit"; exit 0
+    }
+
+    Say ""
+    Say "  Updating $localTag -> $($latest.Tag) ..." Cyan
+    try { $exe = Install-PortableRuntime }
+    catch { Fail "Update failed. Local runtime was left unchanged.`n`n$($_.Exception.Message)" }
+    Say ""
+    Say "  Updated to $($latest.Tag): $exe" Green
+    Read-Host "  Press Enter to exit"; exit 0
+}
+
 if (-not $exe) {
     try { $exe = Install-PortableRuntime }
     catch { Fail "Automatic llama.cpp installation failed.`n`n$($_.Exception.Message)" }
@@ -295,6 +439,10 @@ if (-not $exe) {
 if (-not $exe -or -not (Test-Path $exe)) {
     Fail "llama-server.exe was not found after installation."
 }
+
+# Create update.bat in the package root if it is missing, so an older
+# copy of this package gains the updater on its next launch.
+Ensure-UpdateLauncher
 
 Say ""
 Say "  llama.cpp    : $exe" Green
