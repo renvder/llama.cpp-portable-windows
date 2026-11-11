@@ -826,9 +826,17 @@ function Get-FittedCtx($modelPath, $mmprojPath) {
         $reserveMiB += [int][Math]::Ceiling((Get-Item $mmprojPath).Length / 1MB)
     }
     $out = $null
+    # PS 5.1: this script runs with $ErrorActionPreference = "Stop", and
+    # a native program writing log lines to stderr aborts the call under
+    # Stop (same trap as the --help probe in section 4). Run it under
+    # Continue so stderr is captured instead of throwing, then restore.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     try {
         $out = (& $fitExe -m $modelPath --cache-type-k q8_0 --cache-type-v q8_0 --fit-target $reserveMiB 2>&1 | Out-String)
-    } catch { return $null }
+    } catch { return $null } finally {
+        $ErrorActionPreference = $prevEAP
+    }
     if (-not $out) { return $null }
     if ($out -match "-c\s+(\d+)") {
         $n = [int]$Matches[1]

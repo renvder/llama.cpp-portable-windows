@@ -45,3 +45,6 @@
 ## presets.ini（自動生成）
 
 如果 `start.bat` 旁邊沒有 `presets.ini`，啟動器會生成一次——第一次安裝、更新後、或下次啟動時——依據檢測到的硬件（顯卡、顯存、內存、虛擬內存、CUDA 後端）和 `models\` 裡的模型。每個模型的 `ctx-size` 是固定數字，由 llama.cpp 自帶的 `llama-fit-params` 工具針對這張顯卡和這個模型量出來的，mmproj 文件大小會加進預留量（自動適配不計 mmproj 顯存）。採樣參數按模型家族的官方表填（Qwen3 非思考模式：temp 0.7、top-p 0.8、top-k 20、min-p 0、presence-penalty 1.5），沒見過的家族不填採樣行。生成後文件永遠不會被覆蓋，可以隨便改，刪掉就會重新生成。平時啟動不會重新計算。
+## v1.3.1
+
+修復：自動生成的 `presets.ini` 以前總是退回顯存檔位值（16GB 顯存是 32768），而不是量出來的值。原因是 `llama-fit-params` 會把日誌寫到 stderr，在腳本的 `$ErrorActionPreference = "Stop"` 下會中斷調用。現在改為在 `Continue` 下運行，所以會用上量出來的 `ctx-size`。

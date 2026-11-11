@@ -45,3 +45,6 @@ Double-click **`update.bat`** to update the installed runtime to the latest offi
 ## presets.ini (auto-generated)
 
 If `presets.ini` does not exist next to `start.bat`, the launcher generates it once — at first install, after an update, or on the next launch — from the detected hardware (GPU, VRAM, RAM, pagefile, CUDA backend) and the models in `models\`. Per-model `ctx-size` is a fixed number measured by llama.cpp's own `llama-fit-params` tool for that GPU and model, with the `mmproj` file size added to the fit reserve (auto-fit does not count `mmproj` VRAM). Sampling comes from the model family's official table (Qwen3 non-thinking: temp 0.7, top-p 0.8, top-k 20, min-p 0, presence-penalty 1.5); unknown families get no sampling lines. The file is never overwritten afterwards — edit it freely, or delete it to regenerate. Launching never recalculates it.
+## v1.3.1
+
+Fixed: auto-generated `presets.ini` always fell back to the VRAM-tier context (32768 on 16 GB cards) instead of the measured value. The `llama-fit-params` call wrote its log line to stderr, which aborted the call under the script's `$ErrorActionPreference = "Stop"`. It now runs under `Continue`, so the measured `ctx-size` is used.
