@@ -163,7 +163,9 @@ If `presets.ini` is missing, the launcher generates it automatically (see below)
 
 Use it to set per-model context size, sampling, or other llama.cpp options. Keep it next to `start.bat`.
 
-How the auto-generated file is made: the launcher scans `models\` (one section per folder, `mmproj` paired automatically), measures each model's largest fitting context with llama.cpp's own `llama-fit-params` tool for this GPU, adds the `mmproj` file size to the fit reserve (auto-fit does not count `mmproj` VRAM), and writes that number as a fixed `ctx-size`. Sampling comes from the model family's official table (Qwen3 non-thinking: temp 0.7, top-p 0.8, top-k 20, min-p 0, presence-penalty 1.5). The file is generated once — on first install, after an update, or on the next launch — and never overwritten afterwards. Edit it freely, or delete it to regenerate after changing hardware or models. Your own `presets.ini` is listed in `.gitignore`, so it is never committed.
+How the auto-generated file is made: the launcher scans `models\` (one section per folder, `mmproj` paired automatically), measures each model's largest fitting context with llama.cpp's own `llama-fit-params` tool for this GPU, adds the `mmproj` file size to the fit reserve (auto-fit does not count `mmproj` VRAM), and writes that number as a fixed `ctx-size`. Sampling comes from the model family's official table (Qwen3 non-thinking: temp 0.7, top-p 0.8, top-k 20, min-p 0, presence-penalty 1.5). The file is generated once — on first install, after an update, or on the next launch — and never overwritten afterwards. Edit it freely, or delete it to regenerate after changing hardware or models.
+
+One folder per model: the generator scans subfolders of `models\`, one section per folder. It picks the largest non-`mmproj` `.gguf` in each folder as the model, so do not put two different models (or two quantizations of the same model) in one folder, and do not place a model file directly under `models\` — it will not be picked up. Your own `presets.ini` is listed in `.gitignore`, so it is never committed.
 
 The launcher uses:
 
