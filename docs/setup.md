@@ -21,7 +21,7 @@ Put everything in the **same folder as the launcher**. The location doesn't matt
 <launcher folder>\
 ├─ start.bat                 ← Double-click to start
 ├─ llama-oneclick.ps1        ← Main launcher
-├─ presets.ini               ← Optional: your own per-model settings (not committed to Git)
+├─ presets.ini               ← Auto-generated if missing; your own per-model settings (not committed to Git)
 ├─ runtime\                  ← Created automatically
 │  ├─ cuda13\
 │  ├─ cuda12\
@@ -159,11 +159,11 @@ A model doesn't have to fit entirely in VRAM. llama.cpp can offload part of it t
 
 ### 4. Optional: `presets.ini`
 
-The launcher runs fine without `presets.ini`.
+If `presets.ini` is missing, the launcher generates it automatically (see below) — you do not need to write one by hand.
 
 Use it to set per-model context size, sampling, or other llama.cpp options. Keep it next to `start.bat`.
 
-If `presets.ini` is missing, the launcher generates it automatically from the detected hardware and the models in `models\`. Your own `presets.ini` is listed in `.gitignore`, so it is never committed.
+How the auto-generated file is made: the launcher scans `models\` (one section per folder, `mmproj` paired automatically), measures each model's largest fitting context with llama.cpp's own `llama-fit-params` tool for this GPU, adds the `mmproj` file size to the fit reserve (auto-fit does not count `mmproj` VRAM), and writes that number as a fixed `ctx-size`. Sampling comes from the model family's official table (Qwen3 non-thinking: temp 0.7, top-p 0.8, top-k 20, min-p 0, presence-penalty 1.5). The file is generated once — on first install, after an update, or on the next launch — and never overwritten afterwards. Edit it freely, or delete it to regenerate after changing hardware or models. Your own `presets.ini` is listed in `.gitignore`, so it is never committed.
 
 The launcher uses:
 
@@ -190,7 +190,7 @@ temp = 0.7
 top-p = 0.8
 top-k = 20
 min-p = 0
-presence-penalty = 1.0
+presence-penalty = 1.5
 ```
 
 Notes:
@@ -200,7 +200,7 @@ Notes:
 - `model` and `mmproj` can use relative paths. They are resolved from the launcher folder, which the launcher sets as its working directory.
 - Use forward slashes (`/`) in paths to avoid escape-character problems.
 - `ctx-size = 0` leaves the choice to llama.cpp.
-- With 16 GB or more of VRAM, the launcher usually doesn't override the context size from the command line. It leaves that to `presets.ini` and `--fit`.
+- With 16 GB or more of VRAM, the launcher usually doesn't override the context size from the command line. It leaves that to `presets.ini`. The `ctx-size` in an auto-generated `presets.ini` is a fixed measured number, so `--fit` leaves it alone at launch; a `ctx-size = 0` in the `[*]` section means "let llama.cpp decide".
 - With less than 16 GB of VRAM or RAM, the launcher uses a more conservative context size so it doesn't fill up memory right away.
 
 ---
@@ -274,7 +274,9 @@ A larger context lets the model handle more text at once, but the KV cache uses 
 
 ### Method 1: `presets.ini`
 
-For example:
+First check the auto-generated value: it is already the largest context `llama-fit-params` measured for your GPU and model. If you changed hardware or models, delete `presets.ini` and restart the launcher to regenerate it.
+
+If you want a different trade-off (for example a smaller context to leave VRAM for other apps), edit the `ctx-size` in your model's section by hand:
 
 ```ini
 [MyModel]
@@ -307,7 +309,7 @@ Task Manager → Performance → GPU
 
 If a larger context pushes VRAM close to full or noticeably slows generation, go back to the previous value.
 
-With 16 GB or more of VRAM the launcher does not force a context size: it comes from `presets.ini` or, if unset, from llama.cpp's `--fit`. The practical limit depends on model size, KV cache, other GPU workloads, and `--fit`.
+With 16 GB or more of VRAM the launcher does not force a context size from the command line: it comes from `presets.ini` — auto-generated with the measured maximum, unless you edited it — or, if unset, from llama.cpp's `--fit`. The practical limit depends on model size, KV cache, other GPU workloads, and `--fit`.
 
 ---
 

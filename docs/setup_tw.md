@@ -21,7 +21,7 @@
 <啟動腳本文件夾>\
 ├─ start.bat                 ← 雙擊啟動
 ├─ llama-oneclick.ps1        ← 主啟動腳本
-├─ presets.ini               ← 可選：你自己的單個模型配置（不會提交到 Git）
+├─ presets.ini               ← 缺少時自動生成；你自己的單個模型配置（不會提交到 Git）
 ├─ runtime\                  ← 自動生成：llama.cpp 運行環境
 │  ├─ cuda13\
 │  ├─ cuda12\
@@ -159,11 +159,11 @@ models\
 
 ### 4. （可選）`presets.ini`：單個模型的配置
 
-不創建 `presets.ini` 也可以正常啟動。
+沒有 `presets.ini` 也可以正常啟動，啟動器會自動生成一份（見下文），不用手寫。
 
 如果需要為不同模型指定上下文長度、採樣參數或其他 llama.cpp 參數，可以在啟動腳本旁放置 `presets.ini`。
 
-如果沒有 `presets.ini`，啟動器會按檢測到的硬件和 `models\` 裡的模型自動生成。你自己的 `presets.ini` 已列入 `.gitignore`，不會被提交。
+自動生成的方式：啟動器掃描 `models\`（每個文件夾一個區段，`mmproj` 自動配對），用 llama.cpp 自帶的 `llama-fit-params` 工具針對這張顯卡量出每個模型能用的最大上下文，把 `mmproj` 文件大小加進預留量（自動適配不計 mmproj 顯存），再把這個數字寫死成 `ctx-size`。採樣參數按模型家族的官方表填（Qwen3 非思考模式：temp 0.7、top-p 0.8、top-k 20、min-p 0、presence-penalty 1.5）。文件只生成一次——第一次安裝、更新後、或下次啟動時——之後永遠不會被覆蓋。可以隨便改，換了硬件或模型後刪掉它就會重新生成。你自己的 `presets.ini` 已列入 `.gitignore`，不會被提交。
 
 目前腳本會使用：
 
@@ -190,7 +190,7 @@ temp = 0.7
 top-p = 0.8
 top-k = 20
 min-p = 0
-presence-penalty = 1.0
+presence-penalty = 1.5
 ```
 
 注意：
@@ -200,7 +200,7 @@ presence-penalty = 1.0
 - `model` 和 `mmproj` 可以使用相對路徑，以啟動腳本所在的文件夾為基準（腳本會把它設為工作目錄）。
 - 路徑使用 `/` 更不容易出現轉義字符問題。
 - `ctx-size = 0` 表示交給 llama.cpp 自行決定。
-- 對於 16 GB 及以上顯存，腳本通常不會從命令行強制覆蓋 `presets.ini` 的 ctx，而是讓 preset 和 `--fit` 決定。
+- 對於 16 GB 及以上顯存，腳本通常不會從命令行強制覆蓋 `presets.ini` 的 ctx，而是讓 preset 決定。自動生成的 `presets.ini` 裡的 `ctx-size` 是量出來的固定數字，啟動時 `--fit` 不會改它；`[*]` 裡的 `ctx-size = 0` 才是交給 llama.cpp 自行決定。
 - 對於顯存或內存低於 16 GB 的電腦，腳本會使用較保守的 ctx，以避免一開始就占滿內存。
 
 ---
@@ -273,7 +273,9 @@ ctx 越大，一次能處理的內容越多，但 KV cache 也會占用更多內
 
 ### 方法 1：使用 `presets.ini`
 
-例如：
+先看自動生成的值：它已經是 `llama-fit-params` 針對你的顯卡和模型量出來的最大上下文。換了硬件或模型後，刪掉 `presets.ini` 再重啟就會重新生成。
+
+如果想要別的取捨（比如上下文小一點、把顯存留給別的程序），再手動改模型區段裡的 `ctx-size`：
 
 ```ini
 [MyModel]
@@ -306,7 +308,7 @@ nvidia-smi --query-gpu=memory.used,memory.total --format=csv
 
 如果 ctx 增大後顯存接近占滿，或者生成速度明顯下降，可以回退到上一個值。
 
-對於 16 GB 及以上顯存，腳本不會強制指定上下文長度：由 `presets.ini` 決定，沒有設定時交給 llama.cpp 的 `--fit`。實際可用上下文仍會受到模型大小、KV cache、其他占用 GPU 的程序和 `--fit` 的影響。
+對於 16 GB 及以上顯存，腳本不會從命令行強制指定上下文長度：由 `presets.ini` 決定——自動生成時已填入量出來的最大值，除非你自己改過——沒有設定時交給 llama.cpp 的 `--fit`。實際可用上下文仍會受到模型大小、KV cache、其他占用 GPU 的程序和 `--fit` 的影響。
 
 ---
 
