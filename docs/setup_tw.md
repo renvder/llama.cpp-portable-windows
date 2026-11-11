@@ -22,7 +22,6 @@
 ├─ start.bat                 ← 雙擊啟動
 ├─ llama-oneclick.ps1        ← 主啟動腳本
 ├─ presets.ini               ← 可選：你自己的單個模型配置（不會提交到 Git）
-├─ presets.example.ini       ← 範本：複製為 presets.ini 後修改
 ├─ runtime\                  ← 自動生成：llama.cpp 運行環境
 │  ├─ cuda13\
 │  ├─ cuda12\
@@ -164,7 +163,7 @@ models\
 
 如果需要為不同模型指定上下文長度、採樣參數或其他 llama.cpp 參數，可以在啟動腳本旁放置 `presets.ini`。
 
-倉庫附有範本：把 `presets.example.ini` 複製為 `presets.ini` 再修改即可。你自己的 `presets.ini` 已列入 `.gitignore`，不會被提交。
+如果沒有 `presets.ini`，啟動器會按檢測到的硬件和 `models\` 裡的模型自動生成。你自己的 `presets.ini` 已列入 `.gitignore`，不會被提交。
 
 目前腳本會使用：
 

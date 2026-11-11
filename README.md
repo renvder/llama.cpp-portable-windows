@@ -21,7 +21,7 @@ Double-click `start.bat` and chat with a local LLM in your browser. On the first
 - Everything stays in one folder: copy it to another PC and it re-detects the hardware
 - Router mode: switch models from the Web UI without restarting
 - Sensible defaults for context, KV cache and GPU offload based on your VRAM
-- Optional per-model settings via `presets.ini` (template: `presets.example.ini`)
+- Optional per-model settings via `presets.ini` (auto-generated on first launch if missing)
 
 ## Updating
 

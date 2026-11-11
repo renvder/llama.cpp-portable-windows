@@ -22,7 +22,6 @@ Put everything in the **same folder as the launcher**. The location doesn't matt
 ├─ start.bat                 ← Double-click to start
 ├─ llama-oneclick.ps1        ← Main launcher
 ├─ presets.ini               ← Optional: your own per-model settings (not committed to Git)
-├─ presets.example.ini       ← Template: copy to presets.ini and edit
 ├─ runtime\                  ← Created automatically
 │  ├─ cuda13\
 │  ├─ cuda12\
@@ -164,7 +163,7 @@ The launcher runs fine without `presets.ini`.
 
 Use it to set per-model context size, sampling, or other llama.cpp options. Keep it next to `start.bat`.
 
-A template is included: copy `presets.example.ini` to `presets.ini` and edit it. Your own `presets.ini` is listed in `.gitignore`, so it is never committed.
+If `presets.ini` is missing, the launcher generates it automatically from the detected hardware and the models in `models\`. Your own `presets.ini` is listed in `.gitignore`, so it is never committed.
 
 The launcher uses:
 

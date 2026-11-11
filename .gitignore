@@ -13,7 +13,7 @@ llama-vulkan/
 llama-cpu/
 llama.cpp/
 
-# Personal settings (copy presets.example.ini to presets.ini)
+# Personal settings (presets.ini is auto-generated if missing)
 presets.ini
 presets.ini.bak
 
