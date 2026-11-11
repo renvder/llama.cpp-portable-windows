@@ -5,6 +5,11 @@
 #    1. Detect Windows architecture + GPU + NVIDIA driver/CUDA capability.
 #    2. Select the best official llama.cpp Windows backend.
 #    3. Download the latest stable release directly from ggml-org/llama.cpp.
+#       Downloads use curl.exe (built into Windows 11) with 16 parallel
+#       Range requests per file, so a single slow connection cannot cap
+#       the whole download the way Invoke-WebRequest does. If curl.exe is
+#       missing, or a server refuses Range requests, it falls back to a
+#       single-threaded Invoke-WebRequest download.
 #    4. Install it under THIS SCRIPT'S directory (portable; no winget/CUDA toolkit required).
 #
 #  Later runs:
@@ -261,11 +266,180 @@ function Test-AssetHash($asset, $path) {
     }
 }
 
+
+# ---------------------------------------------------------------------
+# Parallel download (curl.exe, built into Windows 11)
+#   Why: a single Invoke-WebRequest connection to GitHub Release assets
+#   is often capped at ~100-200 KB/s from China, while the broadband
+#   itself is idle. IDM proves the point: 32 connections saturate it.
+#   Each file is split into 16 Range chunks, downloaded by 16 separate
+#   curl.exe processes in parallel, then merged in order. The two files
+#   (main + cudart) run at the same time, so 32 connections in total.
+#   Verified: curl -K config files do NOT work for this -- the `range`
+#   option leaks across transfers in --parallel mode, so every chunk
+#   downloads the same (last) range. Separate curl.exe processes, each
+#   with its own --range argument, download the correct bytes (checked
+#   against the official SHA-256 of b12282).
+#   Fallback: no curl.exe, unknown file size, or a chunk that keeps
+#   failing -> the caller falls back to Invoke-WebRequest.
+# ---------------------------------------------------------------------
+function Get-CurlExe {
+    $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd -and $cmd.Source) { return $cmd.Source }
+    $cmd = Get-Command curl -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd -and $cmd.Source) { return $cmd.Source }
+    if ($env:SystemRoot) {
+        $sysCurl = Join-Path $env:SystemRoot "System32\curl.exe"
+        if (Test-Path $sysCurl) { return $sysCurl }
+    }
+    return $null
+}
+
+function Start-CurlChunk($curl, $url, $start, $end, $outFile) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $curl
+    $psi.Arguments = '-sL --fail --retry 3 --retry-delay 2 -o "' + $outFile + '" --range "' + $start + '-' + $end + '" "' + $url + '"'
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $false
+    $psi.RedirectStandardError = $false
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    return $proc
+}
+
+function Invoke-CurlChunkOnce($curl, $url, $start, $end, $outFile) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $curl
+    $psi.Arguments = '-sL --fail --retry 3 --retry-delay 2 -o "' + $outFile + '" --range "' + $start + '-' + $end + '" "' + $url + '"'
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $false
+    $psi.RedirectStandardError = $false
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+    $proc.Close()
+    return $code
+}
+
+function Merge-Chunks($chunks, $outFile) {
+    $outStream = [System.IO.File]::Create($outFile)
+    try {
+        foreach ($c in $chunks) {
+            $inStream = [System.IO.File]::OpenRead($c.Path)
+            try { $inStream.CopyTo($outStream) } finally { $inStream.Close() }
+        }
+    } finally { $outStream.Close() }
+}
+
+# Downloads every file in $downloads in parallel: 16 Range chunks per
+# file, all files at once (16 + 16 = 32 connections when cudart exists).
+# $downloads is an array of @{ Asset = <GitHub asset>; OutFile = <path> }.
+# Returns $true on success, $false if parallel download is not possible
+# (no curl.exe / unknown size / tiny file) so the caller can fall back.
+# Throws if a chunk keeps failing after retries.
+function Invoke-ParallelDownloads($downloads, $curl) {
+    foreach ($d in $downloads) {
+        if (-not $d.Asset.size -or [long]$d.Asset.size -lt 20MB) { return $false }
+    }
+    $threadsPerFile = 16
+    $plans = @()
+    foreach ($d in $downloads) {
+        $totalSize = [long]$d.Asset.size
+        $chunkSize = [Math]::Ceiling($totalSize / $threadsPerFile)
+        $chunkDir = $d.OutFile + ".parts"
+        if (Test-Path $chunkDir) { Remove-Item $chunkDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $chunkDir | Out-Null
+        $chunks = @()
+        for ($i = 0; $i -lt $threadsPerFile; $i++) {
+            $start = $i * $chunkSize
+            if ($start -ge $totalSize) { break }
+            $end = [Math]::Min($start + $chunkSize - 1, $totalSize - 1)
+            $chunks += @{ Index = $i; Start = $start; End = $end; ExpectedSize = ($end - $start + 1); Path = (Join-Path $chunkDir ("part{0:D2}" -f $i)) }
+        }
+        $plans += @{ Asset = $d.Asset; OutFile = $d.OutFile; TotalSize = $totalSize; ChunkDir = $chunkDir; Chunks = $chunks; Procs = @() }
+    }
+    try {
+        foreach ($plan in $plans) {
+            foreach ($c in $plan.Chunks) {
+                $plan.Procs += (Start-CurlChunk $curl $plan.Asset.browser_download_url $c.Start $c.End $c.Path)
+            }
+        }
+        # Progress: curl runs with -s, so it prints nothing. Poll the chunk
+        # files every 500 ms and show one progress bar: total MB, percent,
+        # current speed and ETA. This is only a display; the downloads run
+        # in the curl processes above.
+        $totalBytes = 0
+        foreach ($plan in $plans) { $totalBytes += $plan.TotalSize }
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $allDone = $false
+        while (-not $allDone) {
+            $allDone = $true
+            foreach ($plan in $plans) {
+                foreach ($proc in $plan.Procs) {
+                    if (-not $proc.HasExited) { $allDone = $false }
+                }
+            }
+            $doneBytes = 0
+            foreach ($plan in $plans) {
+                foreach ($c in $plan.Chunks) {
+                    if (Test-Path $c.Path) { $doneBytes += (Get-Item $c.Path).Length }
+                }
+            }
+            $elapsed = $sw.Elapsed.TotalSeconds
+            if ($elapsed -lt 1) { $elapsed = 1 }
+            $speedMB = ($doneBytes / 1MB) / $elapsed
+            $pct = 0
+            if ($totalBytes -gt 0) { $pct = [Math]::Min(100, [int](($doneBytes * 100) / $totalBytes)) }
+            $eta = ""
+            if ($speedMB -gt 0 -and $doneBytes -lt $totalBytes) {
+                $etaSec = [int]((($totalBytes - $doneBytes) / 1MB) / $speedMB)
+                $eta = " ETA ${etaSec}s"
+            }
+            $status = ("{0:N1} / {1:N1} MB ({2}%)  {3:N2} MB/s{4}" -f ($doneBytes / 1MB), ($totalBytes / 1MB), $pct, $speedMB, $eta)
+            Write-Progress -Activity "Downloading llama.cpp" -Status $status -PercentComplete $pct
+            if (-not $allDone) { Start-Sleep -Milliseconds 500 }
+        }
+        Write-Progress -Activity "Downloading llama.cpp" -Completed
+        Say ("  Downloaded {0:N1} MB in {1:N1}s ({2:N2} MB/s)" -f ($totalBytes / 1MB), $sw.Elapsed.TotalSeconds, (($totalBytes / 1MB) / $sw.Elapsed.TotalSeconds)) Green
+        foreach ($plan in $plans) {
+            for ($i = 0; $i -lt $plan.Chunks.Count; $i++) {
+                $c = $plan.Chunks[$i]
+                $proc = $plan.Procs[$i]
+                $code = $proc.ExitCode
+                $proc.Close()
+                $ok = ($code -eq 0) -and (Test-Path $c.Path) -and ((Get-Item $c.Path).Length -eq $c.ExpectedSize)
+                $tries = 0
+                while (-not $ok -and $tries -lt 2) {
+                    $tries++
+                    $code = Invoke-CurlChunkOnce $curl $plan.Asset.browser_download_url $c.Start $c.End $c.Path
+                    $ok = ($code -eq 0) -and (Test-Path $c.Path) -and ((Get-Item $c.Path).Length -eq $c.ExpectedSize)
+                }
+                if (-not $ok) { throw "Parallel download failed for $($plan.Asset.name) part $($c.Index) (chunk $($c.Start)-$($c.End))." }
+            }
+            Merge-Chunks $plan.Chunks $plan.OutFile
+            if ((Get-Item $plan.OutFile).Length -ne $plan.TotalSize) { throw "Parallel download of $($plan.Asset.name) finished, but the merged size is wrong." }
+        }
+        return $true
+    } finally {
+        foreach ($plan in $plans) {
+            if (Test-Path $plan.ChunkDir) { Remove-Item $plan.ChunkDir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
 function Install-PortableRuntime {
+    param([switch]$IsUpdate)
     if (-not (Test-Path $RUNTIME_DIR)) { New-Item -ItemType Directory -Path $RUNTIME_DIR | Out-Null }
 
     Say ""
-    Say "  No suitable local llama.cpp runtime found." Yellow
+    if (-not $IsUpdate) {
+        Say "  No suitable local llama.cpp runtime found." Yellow
+    }
     Say "  Selecting the official Windows x64 build for: $backendLabel" Yellow
     Say "  Downloading from ggml-org/llama.cpp ..." Cyan
 
@@ -286,17 +460,31 @@ function Install-PortableRuntime {
         $mainZip = Join-Path $temp $main.name
         Say "  Release      : $tag" White
         Say "  Binary       : $($main.name)" White
-        Invoke-WebRequest -Uri $main.browser_download_url -OutFile $mainZip -UseBasicParsing
-        Test-AssetHash $main $mainZip
-
         $allZips = @($mainZip)
         if ($cudart) {
             $cudaZip = Join-Path $temp $cudart.name
             Say "  CUDA runtime : $($cudart.name)" White
-            Invoke-WebRequest -Uri $cudart.browser_download_url -OutFile $cudaZip -UseBasicParsing
-            Test-AssetHash $cudart $cudaZip
             $allZips += $cudaZip
         }
+        $parallelOk = $false
+        $curl = Get-CurlExe
+        if ($curl) {
+            Say "  Downloading with 32 connections (16 per file) ..." Cyan
+            $downloads = @(@{ Asset = $main; OutFile = $mainZip })
+            if ($cudart) { $downloads += @{ Asset = $cudart; OutFile = $cudaZip } }
+            try { $parallelOk = Invoke-ParallelDownloads $downloads $curl }
+            catch {
+                Say "  Parallel download failed ($($_.Exception.Message)) Falling back to single-threaded download." Yellow
+                $parallelOk = $false
+            }
+        }
+        if (-not $parallelOk) {
+            Say "  Downloading single-threaded ..." Cyan
+            Invoke-WebRequest -Uri $main.browser_download_url -OutFile $mainZip -UseBasicParsing
+            if ($cudart) { Invoke-WebRequest -Uri $cudart.browser_download_url -OutFile $cudaZip -UseBasicParsing }
+        }
+        Test-AssetHash $main $mainZip
+        if ($cudart) { Test-AssetHash $cudart $cudaZip }
 
         # Safe replace: extract to a staging folder inside $temp first, verify
         # the new build, and only then swap it in. The old runtime is moved
@@ -389,7 +577,7 @@ if ($UpdateOnly) {
         Say "  Local version is unknown (no runtime-info.json). This may be a manual install." Yellow
         $ans = Read-Host "  Replace it with the latest official build? (y/N)"
         if ($ans -notmatch '^[Yy]$') { Say "  Update cancelled. Local runtime left unchanged." Yellow; exit 0 }
-        try { $exe = Install-PortableRuntime }
+        try { $exe = Install-PortableRuntime -IsUpdate }
         catch { Fail "Update failed. Local runtime was left unchanged.`n`n$($_.Exception.Message)" }
         Say ""
         Say "  Updated: $exe" Green
@@ -424,7 +612,7 @@ if ($UpdateOnly) {
 
     Say ""
     Say "  Updating $localTag -> $($latest.Tag) ..." Cyan
-    try { $exe = Install-PortableRuntime }
+    try { $exe = Install-PortableRuntime -IsUpdate }
     catch { Fail "Update failed. Local runtime was left unchanged.`n`n$($_.Exception.Message)" }
     Say ""
     Say "  Updated to $($latest.Tag): $exe" Green

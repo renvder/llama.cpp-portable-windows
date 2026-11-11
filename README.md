@@ -25,7 +25,7 @@ Double-click `start.bat` and chat with a local LLM in your browser. On the first
 
 ## Updating
 
-Double-click **`update.bat`** to update the installed runtime to the latest official release. It compares the installed release in `runtime\<backend>\runtime-info.json` with the newest release for your hardware, downloads and verifies it first, then swaps it in — a failed download never leaves you with no runtime. If it is already up to date, nothing is downloaded. Launching with `start.bat` never checks for updates, so it also works offline. Note: `update.bat` is not shipped in the source tree — `start.bat` generates it in the package root on first launch.
+Double-click **`update.bat`** to update the installed runtime to the latest official release. It compares the installed release in `runtime\<backend>\runtime-info.json` with the newest release for your hardware, downloads and verifies it first, then swaps it in — a failed download never leaves you with no runtime. If it is already up to date, nothing is downloaded. Downloads use `curl.exe` (built into Windows 11) with 16 parallel Range requests per file (32 connections in total when a CUDA runtime is also downloaded), with a progress bar showing MB, percent, speed and ETA; if `curl.exe` is missing, it falls back to a single-threaded download. Launching with `start.bat` never checks for updates, so it also works offline. Note: `update.bat` is not shipped in the source tree — `start.bat` generates it in the package root on first launch.
 
 ## Documentation
 

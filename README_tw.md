@@ -25,7 +25,7 @@
 
 ## 更新
 
-雙擊 **`update.bat`**，把已安裝的 runtime 更新到最新官方版。它會比對 `runtime\<backend>\runtime-info.json` 裡的已安裝版本和線上最新版，先下載、校驗完再替換，更新中途失敗也不會讓你沒得用。已經是最新版就不下載。雙擊 `start.bat` 啟動時不會檢查更新，斷網也能正常啟動。注意：`update.bat` 不在源碼裡，第一次啟動時由 `start.bat` 自動生成到根目錄。
+雙擊 **`update.bat`**，把已安裝的 runtime 更新到最新官方版。它會比對 `runtime\<backend>\runtime-info.json` 裡的已安裝版本和線上最新版，先下載、校驗完再替換，更新中途失敗也不會讓你沒得用。已經是最新版就不下載。下載用 Windows 11 自帶的 `curl.exe`，每個文件 16 個並行 Range 請求（有 CUDA 包時共 32 個連接），並顯示進度條（MB、百分比、速度、剩餘時間）；沒有 `curl.exe` 時自動退回單線程下載。雙擊 `start.bat` 啟動時不會檢查更新，斷網也能正常啟動。注意：`update.bat` 不在源碼裡，第一次啟動時由 `start.bat` 自動生成到根目錄。
 
 ## 文檔
 
