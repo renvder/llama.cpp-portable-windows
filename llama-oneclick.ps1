@@ -33,6 +33,15 @@
 #    AMD / Intel             -> Vulkan
 #    Otherwise               -> CPU
 #
+#  presets.ini: if the file does not exist, the launcher generates it once
+#  (at first install / after an update / on the next launch) from the
+#  detected hardware and the models in models\, then never touches it
+#  again. Per-model ctx-size is a fixed number measured by llama.cpp's
+#  own llama-fit-params tool for this GPU + model, with the mmproj file
+#  size added to the fit reserve (auto-fit does NOT count mmproj VRAM).
+#  Launching never recalculates it: a ctx-size written in presets.ini
+#  is explicit, so --fit leaves it alone. Edit the file freely afterwards.
+#
 #  The script keeps the existing model/router/VRAM/preset logic below.
 # =====================================================================
 
@@ -117,6 +126,18 @@ if ($vendor -eq "cpu") {
 }
 
 $ramGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
+# Virtual memory (RAM + pagefile). Pagefile is only a safety net: it is
+# never used to size ctx, because a model spilling to disk is too slow
+# to count as usable. It is shown here and used only as a guardrail
+# (warn when even RAM + pagefile cannot hold a model).
+$pageGB = 0
+try {
+    $osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+    if ($osInfo -and $osInfo.TotalVirtualMemorySize -and $osInfo.TotalVisibleMemorySize) {
+        $pageGB = [math]::Round(($osInfo.TotalVirtualMemorySize - $osInfo.TotalVisibleMemorySize) / 1MB, 1)
+        if ($pageGB -lt 0) { $pageGB = 0 }
+    }
+} catch { }
 $cores = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum
 if (-not $cores) { $cores = [Environment]::ProcessorCount / 2 }
 $threads = [math]::Max(4, [math]::Min($cores, 16))
@@ -149,6 +170,7 @@ Say ""
 Say "  GPU          : $gpuName" White
 Say "  VRAM         : $(if ($vramGB -gt 0) { "$vramGB GB" } else { "-" })" White
 Say "  RAM          : $ramGB GB" White
+if ($pageGB -gt 0) { Say "  Virtual mem  : $([math]::Round($ramGB + $pageGB, 1)) GB (RAM $ramGB GB + pagefile $pageGB GB)" White }
 Say "  CPU cores    : $cores" White
 if ($driverVersion) { Say "  NVIDIA driver: $driverVersion (nvidia-smi CUDA $cudaReported)" White }
 Say "  Selected     : $backendLabel" Green
@@ -616,6 +638,7 @@ if ($UpdateOnly) {
     catch { Fail "Update failed. Local runtime was left unchanged.`n`n$($_.Exception.Message)" }
     Say ""
     Say "  Updated to $($latest.Tag): $exe" Green
+    if (New-PresetsFile) { Say "  presets.ini auto-generated (fixed ctx-size, measured for this GPU + model)" Green }
     Read-Host "  Press Enter to exit"; exit 0
 }
 
@@ -762,6 +785,109 @@ $ggufs | Select-Object -First 8 | ForEach-Object {
 if ($ggufs.Count -gt 8) { Say "    - ...and $($ggufs.Count - 8) more" DarkGray }
 
 # ---------------------------------------------------------------------
+# 6b. Auto-generate presets.ini (once, only when the file is missing)
+#      Rules:
+#      - Never overwrites an existing presets.ini. A hand-written file
+#        always wins; delete it yourself if you want a fresh one.
+#      - Model / mmproj paths come from scanning models\: one section
+#        per folder, section name = folder name, mmproj-*.gguf in the
+#        same folder is paired automatically.
+#      - ctx-size is a FIXED number, measured once by llama.cpp's own
+#        llama-fit-params tool (it reads the GGUF header and measures
+#        this GPU): the largest ctx that fits with all layers on GPU.
+#        The mmproj file size is added to the fit reserve, because
+#        auto-fit does not count mmproj VRAM (known llama.cpp issue:
+#        fit can look successful and still OOM while loading mmproj).
+#        Cache type matches the launcher (q8_0 K+V) so the measured
+#        number matches what the server will actually use.
+#      - If the tool is missing or fails, fall back to the VRAM-tier
+#        ctx already calculated above ($ctx). Still fixed, still safe.
+#      - Sampling comes from the model family's official table
+#        (Qwen3 non-thinking: temp 0.7, top-p 0.8, top-k 20, min-p 0,
+#        presence-penalty 1.5 for quantized models). Unknown families
+#        get no sampling lines, so the server defaults apply.
+#      - Pagefile is NOT used to size ctx. It only guards: if the
+#        model file alone is larger than RAM + pagefile, generation
+#        warns and still writes the file with the tier ctx.
+# ---------------------------------------------------------------------
+function Get-SamplingForModel($modelName) {
+    if ($modelName -match "Qwen3") {
+        return @{ temp = "0.7"; "top-p" = "0.8"; "top-k" = "20"; "min-p" = "0"; "presence-penalty" = "1.5" }
+    }
+    return $null
+}
+
+function Get-FittedCtx($modelPath, $mmprojPath) {
+    if (-not $exe -or -not (Test-Path $exe)) { return $null }
+    $fitExe = Join-Path (Split-Path $exe -Parent) "llama-fit-params.exe"
+    if (-not (Test-Path $fitExe)) { return $null }
+    $reserveMiB = 1024
+    if ($mmprojPath -and (Test-Path $mmprojPath)) {
+        $reserveMiB += [int][Math]::Ceiling((Get-Item $mmprojPath).Length / 1MB)
+    }
+    $out = $null
+    try {
+        $out = (& $fitExe -m $modelPath --cache-type-k q8_0 --cache-type-v q8_0 --fit-target $reserveMiB 2>&1 | Out-String)
+    } catch { return $null }
+    if (-not $out) { return $null }
+    if ($out -match "-c\s+(\d+)") {
+        $n = [int]$Matches[1]
+        if ($n -ge 4096) { return $n }
+    }
+    return $null
+}
+
+function New-PresetsFile {
+    $presetsPath = Join-Path $PSScriptRoot "presets.ini"
+    if (Test-Path $presetsPath) { return $false }
+    if (-not (Test-Path $MODELS_DIR)) { return $false }
+    $folders = Get-ChildItem $MODELS_DIR -Directory -ErrorAction SilentlyContinue | Where-Object {
+        @(Get-ChildItem $_.FullName -Filter "*.gguf" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^mmproj" }).Count -gt 0
+    }
+    if (-not $folders -or $folders.Count -eq 0) { return $false }
+    $lines = @()
+    $lines += "; Auto-generated by llama-oneclick.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+    $lines += "; Hardware at generation time: $gpuName, VRAM $vramGB GB, RAM $ramGB GB, pagefile $pageGB GB, backend $backendLabel"
+    $lines += "; ctx-size per model is a FIXED number measured by llama-fit-params for this GPU + model."
+    $lines += "; This file is never overwritten by the launcher. Edit it freely, or delete it to regenerate."
+    $lines += ""
+    $lines += "version = 1"
+    $lines += ""
+    $lines += "[*]"
+    $lines += "ctx-size = 0"
+    foreach ($folder in $folders) {
+        $mainFiles = @(Get-ChildItem $folder.FullName -Filter "*.gguf" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^mmproj" } | Sort-Object Length -Descending)
+        $main = $mainFiles[0]
+        $mmprojFile = @(Get-ChildItem $folder.FullName -Filter "mmproj*.gguf" -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 1)
+        $mmprojPath = $null
+        if ($mmprojFile) { $mmprojPath = $mmprojFile.FullName }
+        $modelRel = ("./models/{0}/{1}" -f $folder.Name, $main.Name)
+        $fitted = Get-FittedCtx $main.FullName $mmprojPath
+        $modelCtx = $ctx
+        if ($fitted) { $modelCtx = $fitted }
+        if ($main.Length -gt (($ramGB + $pageGB) * 1GB)) {
+            Say ("  Warning: {0} ({1:N1} GB) is larger than RAM + pagefile; it may not load." -f $main.Name, ($main.Length / 1GB)) Yellow
+        }
+        $lines += ""
+        $lines += ("[{0}]" -f $folder.Name)
+        $lines += ("model = {0}" -f $modelRel)
+        if ($mmprojFile) { $lines += ("mmproj = ./models/{0}/{1}" -f $folder.Name, $mmprojFile.Name) }
+        $lines += ("ctx-size = {0}" -f $modelCtx)
+        $sampling = Get-SamplingForModel $folder.Name
+        if ($sampling) {
+            $lines += ("temp = {0}" -f $sampling.temp)
+            $lines += ("top-p = {0}" -f $sampling["top-p"])
+            $lines += ("top-k = {0}" -f $sampling["top-k"])
+            $lines += ("min-p = {0}" -f $sampling["min-p"])
+            $lines += ("presence-penalty = {0}" -f $sampling["presence-penalty"])
+        }
+        Say ("  presets.ini: [{0}] ctx-size = {1}{2}" -f $folder.Name, $modelCtx, $(if ($fitted) { " (measured by llama-fit-params)" } else { " (VRAM-tier fallback)" })) Green
+    }
+    $lines | Set-Content -Path $presetsPath -Encoding ASCII
+    return $true
+}
+
+# ---------------------------------------------------------------------
 # 7. presets.ini (optional)
 #    Precedence in llama-server: CLI args > per-model section > [*] global section.
 #    Anything passed on the CLI therefore overrides presets.ini, so this launcher
@@ -769,6 +895,15 @@ if ($ggufs.Count -gt 8) { Say "    - ...and $($ggufs.Count - 8) more" DarkGray }
 #    Put those in presets.ini instead.
 # ---------------------------------------------------------------------
 $presets    = Join-Path $PSScriptRoot "presets.ini"
+# Generate once when missing (first install / after an update / after
+# the user deletes it). An existing file is never touched, and a normal
+# launch never rewrites it.
+if (-not (Test-Path $presets)) {
+    if (New-PresetsFile) {
+        Say ""
+        Say "  presets.ini auto-generated (fixed ctx-size, measured for this GPU + model)" Green
+    }
+}
 $usePresets = (Test-Path $presets) -and (Has "--models-preset")
 
 if ($usePresets) {
