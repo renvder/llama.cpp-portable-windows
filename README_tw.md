@@ -30,6 +30,7 @@
 ## 文檔
 
 - 安裝指南: [漢](docs/setup_tw.md) | [EN](docs/setup.md)
+- 模型文件夾結構（視覺模型、presets.ini）: [漢](docs/Vision_Multimodal_Setup_tw.md) | [EN](docs/Vision_Multimodal_Setup.md)
 - 博客文章: [漢](https://renvder.com/blog/llama-cpp-windows-one-click-setup/) | [EN](https://renvder.com/en/blog/llama-cpp-windows-one-click-setup/)
 
 ## 注意事項
@@ -44,7 +45,13 @@
 [MIT](LICENSE)
 ## presets.ini（自動生成）
 
-如果 `start.bat` 旁邊沒有 `presets.ini`，啟動器會生成一次——第一次安裝、更新後、或下次啟動時——依據檢測到的硬件（顯卡、顯存、內存、虛擬內存、CUDA 後端）和 `models\` 裡的模型。每個模型的 `ctx-size` 是固定數字，由 llama.cpp 自帶的 `llama-fit-params` 工具針對這張顯卡和這個模型量出來的，mmproj 文件大小會加進預留量（自動適配不計 mmproj 顯存）。採樣參數按模型家族的官方表填（Qwen3 非思考模式：temp 0.7、top-p 0.8、top-k 20、min-p 0、presence-penalty 1.5），沒見過的家族不填採樣行。生成後文件永遠不會被覆蓋，可以隨便改，刪掉就會重新生成。平時啟動不會重新計算。
+如果 `start.bat` 旁邊沒有 `presets.ini`，啟動器會生成一次——第一次安裝、更新後、或下次啟動時——依據檢測到的硬件（顯卡、顯存、內存、虛擬內存、CUDA 後端）和 `models\` 裡的模型。每個模型的 `ctx-size` 是固定數字，由 llama.cpp 自帶的 `llama-fit-params` 工具針對這張顯卡和這個模型量出來的，mmproj 文件大小會加進預留量（自動適配不計 mmproj 顯存）。採樣參數按模型家族的官方表填（Qwen3 非思考模式：temp 0.7、top-p 0.8、top-k 20、min-p 0、presence-penalty 1.5），沒見過的家族不填採樣行。模型沒有變化時，啟動不會重新計算，文件可以隨便改。如果文件裡的 `model` / `mmproj` 路徑找不到，或 `models\` 裡的 `.gguf` 文件有增加、刪除、替換，啟動器會把舊文件另存為 `presets.ini.bak`，並自動生成新的。刪掉文件頭部的 `; models-signature:` 那一行，就不再檢查模型變化（路徑缺失時仍會重新生成）。換了硬件後，刪掉 `presets.ini` 即可重新生成。
 ## v1.3.1
 
 修復：自動生成的 `presets.ini` 以前總是退回顯存檔位值（16GB 顯存是 32768），而不是量出來的值。原因是 `llama-fit-params` 會把日誌寫到 stderr，在腳本的 `$ErrorActionPreference = "Stop"` 下會中斷調用。現在改為在 `Continue` 下運行，所以會用上量出來的 `ctx-size`。
+
+## v1.3.2
+
+新增：`presets.ini` 現在會跟着模型變化。每次啟動，啟動器都會檢查自動生成的文件：如果裡面的 `model` / `mmproj` 路徑找不到，或 `models\` 裡的 `.gguf` 文件有增加、刪除、替換（靠文件頭部的 `models-signature` 行識別），就把舊文件另存為 `presets.ini.bak`，並按原有規則重新生成（實測 `ctx-size`、模型家族採樣表）。換模型後不用再手動刪 `presets.ini`。沒有 signature 行的手寫文件只檢查路徑是否缺失。
+
+注意：舊版本生成的 `presets.ini` 沒有 signature 行，重新生成一次之前只會檢查路徑缺失。
