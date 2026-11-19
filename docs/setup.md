@@ -138,7 +138,7 @@ Example:
 
 ```text
 models\
-├─ Qwen3-14B-Q4_K_M.gguf
+├─ Qwen3-14B-Q4_K_M.gguf     ← loads, but gets no auto-generated presets.ini entry
 │
 ├─ Gemma-3-12B\
 │  ├─ Gemma-3-12B-Q4_K_M.gguf
@@ -153,6 +153,8 @@ models\
    └─ Kimi-K2-00006-of-00006.gguf
 ```
 
+> **Recommended: give every model its own folder**, even single-file text models. A model loose in `models\` loads fine in the router, but the launcher's auto-generated `presets.ini` only scans subfolders, so it gets no measured `ctx-size` and no sampling settings. Vision models need their own folder anyway to pair with `mmproj`. Details: [Model folder layout](Vision_Multimodal_Setup.md).
+
 A model doesn't have to fit entirely in VRAM. llama.cpp can offload part of it to system RAM, but that usually slows things down.
 
 ---
@@ -163,7 +165,7 @@ If `presets.ini` is missing, the launcher generates it automatically (see below)
 
 Use it to set per-model context size, sampling, or other llama.cpp options. Keep it next to `start.bat`.
 
-How the auto-generated file is made: the launcher scans `models\` (one section per folder, `mmproj` paired automatically), measures each model's largest fitting context with llama.cpp's own `llama-fit-params` tool for this GPU, adds the `mmproj` file size to the fit reserve (auto-fit does not count `mmproj` VRAM), and writes that number as a fixed `ctx-size`. Sampling comes from the model family's official table (Qwen3 non-thinking: temp 0.7, top-p 0.8, top-k 20, min-p 0, presence-penalty 1.5). The file is generated once — on first install, after an update, or on the next launch — and never overwritten afterwards. Edit it freely, or delete it to regenerate after changing hardware or models.
+How the auto-generated file is made: the launcher scans `models\` (one section per folder, `mmproj` paired automatically), measures each model's largest fitting context with llama.cpp's own `llama-fit-params` tool for this GPU, adds the `mmproj` file size to the fit reserve (auto-fit does not count `mmproj` VRAM), and writes that number as a fixed `ctx-size`. Sampling comes from the model family's official table (Qwen3 non-thinking: temp 0.7, top-p 0.8, top-k 20, min-p 0, presence-penalty 1.5). The file is generated once — on first install, after an update, or on the next launch — and not recalculated while your models stay the same, so you can edit it freely. If a `model` / `mmproj` path in it no longer exists, or the `.gguf` files in `models\` are added, removed or replaced, the launcher saves the old file as `presets.ini.bak` and generates a new one (the header has a `; models-signature:` line used for this; delete that line to turn off the change check). After changing hardware, delete `presets.ini` to regenerate it.
 
 One folder per model: the generator scans subfolders of `models\`, one section per folder. It picks the largest non-`mmproj` `.gguf` in each folder as the model, so do not put two different models (or two quantizations of the same model) in one folder, and do not place a model file directly under `models\` — it will not be picked up. Your own `presets.ini` is listed in `.gitignore`, so it is never committed.
 
@@ -276,7 +278,7 @@ A larger context lets the model handle more text at once, but the KV cache uses 
 
 ### Method 1: `presets.ini`
 
-First check the auto-generated value: it is already the largest context `llama-fit-params` measured for your GPU and model. If you changed hardware or models, delete `presets.ini` and restart the launcher to regenerate it.
+First check the auto-generated value: it is already the largest context `llama-fit-params` measured for your GPU and model. If you changed models, the launcher regenerates it automatically on the next start (old file saved as `presets.ini.bak`). If you changed hardware, delete `presets.ini` and restart the launcher to regenerate it.
 
 If you want a different trade-off (for example a smaller context to leave VRAM for other apps), edit the `ctx-size` in your model's section by hand:
 
