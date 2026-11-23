@@ -1,3 +1,5 @@
+![llama.cpp Portable Launcher for Windows](images/llama-cpp.webp)
+
 <p align="right">
   🌐 <b>EN</b> |
   <a href="./README_tw.md"><b>漢</b></a>
