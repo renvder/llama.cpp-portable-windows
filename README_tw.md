@@ -1,3 +1,5 @@
+![llama.cpp Windows 便攜啟動器](images/llama-cpp.webp)
+
 <p align="right">
   🌐 <a href="./README.md"><b>EN</b></a> |
   <b>漢</b>
